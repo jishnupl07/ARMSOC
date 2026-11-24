@@ -36,7 +36,7 @@ void main() {
       ]));
     });
 
-    test('buildPrompt formats prompt matching Python reference specification', () {
+    test('buildPrompt formats compact prompt without raw SMS body', () {
       const result = ClassificationResult(
         rawText: 'Your SBI KYC expired. Update now at http://sbi-kyc-verify.xyz',
         scamProbability: 0.99960751,
@@ -51,11 +51,17 @@ void main() {
 
       final prompt = RiskAdvisorService.buildPrompt(result);
 
-      expect(prompt, contains('Message: Your SBI KYC expired. Update now at http://sbi-kyc-verify.xyz'));
-      expect(prompt, contains('Classifier decision: scam (scam score 0.9996, threshold 0.8240)'));
-      expect(prompt, contains('Words that influenced the decision: "kyc" (scam), "sbi" (legitimate)'));
-      expect(prompt, contains('Links found: http://sbi-kyc-verify.xyz'));
-      expect(prompt, contains('Write the explanation and actions for the user.'));
+      // Verify prompt components
+      expect(prompt, contains('Decision: SCAM'));
+      expect(prompt, contains('score: 1.000'));
+      expect(prompt, contains('threshold: 0.824'));
+      expect(prompt, contains('indicators: kyc (scam), sbi (legitimate)'));
+      expect(prompt, contains('URL: sbi-kyc-verify.xyz'));
+
+      // Verify complete SMS body is excluded
+      expect(prompt, isNot(contains(result.rawText)));
+      expect(prompt, isNot(contains('Message:')));
+      expect(prompt, isNot(contains('http://')));
     });
 
     test('RiskAdvisorService uses Llama when model is available', () async {
