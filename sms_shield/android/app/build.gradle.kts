@@ -19,7 +19,7 @@ android {
         applicationId = "com.antigravity.sms_shield"
         // You can update the following values to match your application needs.
         // For more information, see: https://flutter.dev/to/review-gradle-config.
-        minSdk = flutter.minSdkVersion
+        minSdk = 23
         targetSdk = flutter.targetSdkVersion
         // Uses the version code from pubspec.yaml. When using split APKs, 1000 * ABI_VERSION
         // is added automatically by Flutter. (https://developer.android.com/studio/build/configure-apk-splits#configure-APK-versions)
@@ -27,6 +27,10 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        ndk {
+            abiFilters.addAll(listOf("arm64-v8a", "x86_64"))
+        }
     }
 
     buildTypes {
@@ -46,4 +50,11 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+dependencies {
+    implementation(files("libs/executorch-1.6.0-xnnpack.aar"))
+    implementation("com.facebook.fbjni:fbjni:0.7.0")
+    implementation("com.facebook.soloader:nativeloader:0.10.5")
+    implementation("androidx.core:core-ktx:1.15.0")
 }
