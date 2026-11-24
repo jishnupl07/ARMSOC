@@ -1,0 +1,15 @@
+{
+  "model": "NB_word_counts",
+  "label_map": {
+    "1": "scam",
+    "0": "legitimate"
+  },
+  "threshold": 0.9999995991352031,
+  "target_scam_recall": 0.95,
+  "validation_pr_auc": 1.0,
+  "test_pr_auc": 1.0,
+  "train_rows": 21000,
+  "val_rows": 4500,
+  "test_rows": 4500,
+  "input": "raw SMS text (no preprocessing required)"
+}

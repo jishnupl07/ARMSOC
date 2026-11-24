@@ -1,0 +1,5 @@
+config,threshold,real_PR_AUC,real_scam_recall,real_precision,real_FPR_legit,synth_PR_AUC,synth_scam_recall,synth_precision,synth_FPR_legit
+A_synthetic_only,0.0684,0.4937,0.9067,0.1938,0.5373,1.0,1.0,0.9995,0.0004
+B_real_only,0.8248,0.9936,0.8601,1.0,0.0,0.6421,0.1872,0.7137,0.0614
+C_mixed,0.824,0.9828,0.8601,0.994,0.0007,1.0,1.0,1.0,0.0
+D_mixed_augmented,0.9206,0.9879,0.829,1.0,0.0,1.0,0.9995,1.0,0.0
