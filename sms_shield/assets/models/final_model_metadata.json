@@ -1,0 +1,36 @@
+{
+  "model_name": "final_scam_classifier",
+  "version": "1.0",
+  "task": "binary SMS classification: scam vs legitimate",
+  "label_map": {
+    "1": "scam",
+    "0": "legitimate"
+  },
+  "input": "raw SMS text, no preprocessing needed",
+  "architecture": "TF-IDF char_wb(2-5) + word(1-2) -> logistic regression (C=3, balanced)",
+  "training_data": {
+    "synthetic_train_rows": 21000,
+    "real_train_rows": 2709,
+    "real_weight": 5.0
+  },
+  "threshold": 0.8240050992072093,
+  "threshold_selected_on": "real validation split, scam recall >= 0.90",
+  "test_results": {
+    "real_test_UCI": {
+      "n": 1487,
+      "PR_AUC": 0.9721,
+      "scam_recall": 0.8125,
+      "precision": 0.9915,
+      "FPR_legit": 0.0007
+    },
+    "synthetic_test": {
+      "n": 4500,
+      "PR_AUC": 1.0,
+      "scam_recall": 1.0,
+      "precision": 1.0,
+      "FPR_legit": 0.0
+    }
+  },
+  "seed": 42,
+  "note": "Real test set was used once for reporting. Estimates on real Indian SMS are not yet available."
+}
