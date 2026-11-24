@@ -1,53 +1,141 @@
 package com.antigravity.sms_shield
 
-import android.os.Bundle
+import android.util.Log
 import io.flutter.embedding.android.FlutterActivity
 import io.flutter.embedding.engine.FlutterEngine
 import io.flutter.plugin.common.MethodChannel
-import java.io.File
+import kotlin.math.min
 
 class MainActivity : FlutterActivity() {
-    private val CHANNEL = "com.antigravity.sms_shield/llama_executorch"
+
+    companion object {
+        private const val TAG = "MainActivity"
+        private const val CHANNEL = "com.antigravity.sms_shield/llama_executorch"
+        private const val MAX_GENERATION_TOKENS = 35
+    }
+
+    private var llamaManager: LlamaManager? = null
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         super.configureFlutterEngine(flutterEngine)
 
+        val manager = LlamaManager.getInstance(applicationContext)
+        llamaManager = manager
+
         MethodChannel(flutterEngine.dartExecutor.binaryMessenger, CHANNEL).setMethodCallHandler { call, result ->
             when (call.method) {
                 "isModelReady" -> {
-                    // Check if quantized Llama 3.2 1B .pte model and tokenizer are present
-                    val pteInFiles = File(filesDir, "llama1b_q4.pte").exists()
-                    val pteInExternal = getExternalFilesDir(null)?.let { File(it, "llama1b_q4.pte").exists() } ?: false
-                    var pteInAssets = false
-                    try {
-                        assets.open("models/llama1b_q4.pte").close()
-                        pteInAssets = true
-                    } catch (_: Exception) {
-                        // Model not placed in assets yet
-                    }
+                    if (manager.isModelReady()) {
+                        result.success(true)
+                    } else if (manager.areModelFilesPresent()) {
+                        // Start/await background load and notify Flutter when ready
+                        manager.loadModel(object : LlamaManager.LoadCallback {
+                            override fun onLoaded() {
+                                result.success(true)
+                            }
 
-                    val isReady = pteInFiles || pteInExternal || pteInAssets
-                    result.success(isReady)
+                            override fun onError(error: String) {
+                                Log.w(TAG, "isModelReady load check failed: $error")
+                                result.success(false)
+                            }
+                        })
+                    } else {
+                        // Model or tokenizer file missing in app external files directory
+                        result.success(false)
+                    }
                 }
 
                 "generate" -> {
                     val systemPrompt = call.argument<String>("systemPrompt") ?: ""
-                    val userPrompt = call.argument<String>("userPrompt") ?: ""
+                    val rawUserPrompt = call.argument<String>("userPrompt")
+                        ?: call.argument<String>("prompt")
+                        ?: ""
+                    val requestedTokens = call.argument<Int>("maxNewTokens") ?: MAX_GENERATION_TOKENS
+                    val temperature = (call.argument<Double>("temperature") ?: 0.1).toFloat()
 
-                    // When native ExecuTorch .pte runner is loaded:
-                    // ExecuTorchRunner.generate(systemPrompt, userPrompt)
-                    // Currently falls back with explicit message if runner binary not yet linked
-                    result.error(
-                        "PTE_NOT_MOUNTED",
-                        "llama1b_q4.pte not detected in app storage. Copy exported .pte file into device storage or assets.",
-                        null
-                    )
+                    // Constrain tokens strictly to preserve 128 context budget
+                    val safeTokens = min(requestedTokens, MAX_GENERATION_TOKENS).coerceAtLeast(1)
+
+                    if (!manager.areModelFilesPresent()) {
+                        result.error(
+                            "MODEL_NOT_FOUND",
+                            "Model artifacts missing. Place llama1b_q4.pte and tokenizer.model in external files dir.",
+                            null
+                        )
+                        return@setMethodCallHandler
+                    }
+
+                    val formattedPrompt = formatLlamaPrompt(systemPrompt, rawUserPrompt)
+
+                    val executeGeneration = {
+                        manager.generate(
+                            prompt = formattedPrompt,
+                            maxNewTokens = safeTokens,
+                            temperature = temperature,
+                            callback = object : LlamaManager.GenerationCallback {
+                                override fun onSuccess(response: String) {
+                                    result.success(response)
+                                }
+
+                                override fun onError(error: String) {
+                                    result.error("GENERATION_ERROR", error, null)
+                                }
+                            }
+                        )
+                    }
+
+                    if (manager.isModelReady()) {
+                        executeGeneration()
+                    } else {
+                        // Ensure model is loaded first before generating
+                        manager.loadModel(object : LlamaManager.LoadCallback {
+                            override fun onLoaded() {
+                                executeGeneration()
+                            }
+
+                            override fun onError(error: String) {
+                                result.error("MODEL_LOAD_ERROR", error, null)
+                            }
+                        })
+                    }
                 }
 
                 else -> {
                     result.notImplemented()
                 }
             }
+        }
+    }
+
+    /**
+     * Formats prompt into the standard Meta Llama 3.2 Instruct chat template:
+     * <|begin_of_text|><|start_header_id|>system<|end_header_id|>
+     * {systemPrompt}<|eot_id|><|start_header_id|>user<|end_header_id|>
+     * {userPrompt}<|eot_id|><|start_header_id|>assistant<|end_header_id|>
+     */
+    private fun formatLlamaPrompt(systemPrompt: String, userPrompt: String): String {
+        if (userPrompt.startsWith("<|begin_of_text|>")) {
+            return userPrompt
+        }
+        val sb = StringBuilder("<|begin_of_text|>")
+        if (systemPrompt.isNotBlank()) {
+            sb.append("<|start_header_id|>system<|end_header_id|>\n\n")
+            sb.append(systemPrompt.trim())
+            sb.append("<|eot_id|>")
+        }
+        sb.append("<|start_header_id|>user<|end_header_id|>\n\n")
+        sb.append(userPrompt.trim())
+        sb.append("<|eot_id|>")
+        sb.append("<|start_header_id|>assistant<|end_header_id|>\n\n")
+        return sb.toString()
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // If the activity is finishing permanently (not just configuration change/rotation),
+        // gracefully release native module resources and worker threads.
+        if (isFinishing) {
+            LlamaManager.resetInstance()
         }
     }
 }

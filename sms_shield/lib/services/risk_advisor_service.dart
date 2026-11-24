@@ -87,7 +87,7 @@ class ExecuTorchLlamaBackend implements LlamaBackend {
     final String response = await _channel.invokeMethod('generate', {
       'systemPrompt': systemPrompt,
       'userPrompt': userPrompt,
-      'maxNewTokens': 200,
+      'maxNewTokens': 35,
       'temperature': 0.1,
     });
     return response.trim();
@@ -99,28 +99,57 @@ class RiskAdvisorService {
   final LlamaBackend? llamaBackend;
 
   static const String systemInstruction =
-      'You are a security assistant that explains SMS scam decisions to non-expert users. '
-      'The classifier has already made the decision; do not change it. '
-      'Explain in plain language, in at most 5 short sentences, why the message is or is not likely a scam. '
-      'Then give 2 to 3 concrete actions the user should take. Never ask for OTPs, PINs or card details. '
-      'Do not invent facts about the sender.';
+      'Explain the fixed classifier result. Never change its label. Give one reason and two safe actions. Never request OTPs, PINs or card details.';
 
   RiskAdvisorService({this.llamaBackend});
 
-  /// Constructs the prompt matching build_prompt(a) from the Python reference.
-  static String buildPrompt(ClassificationResult a) {
-    final terms = a.topContributingTerms.isNotEmpty
-        ? a.topContributingTerms
-            .map((t) => '"${t.term}" (${t.pushesScam ? 'scam' : 'legitimate'})')
-            .join(', ')
-        : 'none';
-    final urls = a.extractedUrls.isNotEmpty ? a.extractedUrls.join(', ') : 'none';
+  /// Extracts only the hostname/domain from a URL string, bounded in length.
+  static String extractDomain(String rawUrl) {
+    var url = rawUrl.trim();
+    if (url.isEmpty) return 'none';
+    if (!url.startsWith('http://') && !url.startsWith('https://')) {
+      url = 'https://$url';
+    }
+    String domain = '';
+    try {
+      final uri = Uri.parse(url);
+      domain = uri.host;
+    } catch (_) {}
+    if (domain.isEmpty) {
+      var cleaned = rawUrl.replaceFirst(RegExp(r'^https?://', caseSensitive: false), '');
+      final slashIdx = cleaned.indexOf('/');
+      if (slashIdx != -1) cleaned = cleaned.substring(0, slashIdx);
+      final colonIdx = cleaned.indexOf(':');
+      if (colonIdx != -1) cleaned = cleaned.substring(0, colonIdx);
+      final qIdx = cleaned.indexOf('?');
+      if (qIdx != -1) cleaned = cleaned.substring(0, qIdx);
+      domain = cleaned;
+    }
+    domain = domain.replaceFirst(RegExp(r'^www\.', caseSensitive: false), '').trim();
+    if (domain.isEmpty) return 'none';
+    if (domain.length > 40) domain = domain.substring(0, 40);
+    return domain;
+  }
 
-    return 'Message: ${a.rawText}\n'
-        'Classifier decision: ${a.labelText.toLowerCase()} (scam score ${a.scamProbability.toStringAsFixed(4)}, threshold ${a.threshold.toStringAsFixed(4)})\n'
-        'Words that influenced the decision: $terms\n'
-        'Links found: $urls\n'
-        'Write the explanation and actions for the user.';
+  /// Constructs a compact prompt for Llama 3.2 1B targeting a maximum of 80 input tokens.
+  /// Example: Decision: SCAM; score: 1.000; threshold: 0.824; indicators: urgent (scam), verify (scam); URL: sbi-kyc-verify.xyz.
+  static String buildPrompt(ClassificationResult a) {
+    final decision = a.labelText.toUpperCase();
+    final score = a.scamProbability.toStringAsFixed(3);
+    final threshold = a.threshold.toStringAsFixed(3);
+
+    final termsList = a.topContributingTerms.take(2).map((t) {
+      final cleanTerm = t.term.length > 20 ? t.term.substring(0, 20) : t.term;
+      final dir = t.pushesScam ? 'scam' : 'legitimate';
+      return '$cleanTerm ($dir)';
+    }).toList();
+    final indicators = termsList.isNotEmpty ? termsList.join(', ') : 'none';
+
+    final url = a.extractedUrls.isNotEmpty
+        ? extractDomain(a.extractedUrls.first)
+        : 'none';
+
+    return 'Decision: $decision; score: $score; threshold: $threshold; indicators: $indicators; URL: $url.';
   }
 
   /// Evaluates and generates security advice for a classified message.
